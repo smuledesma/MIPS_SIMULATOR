@@ -9,8 +9,11 @@
 using namespace std;
 
 bool brake = false;
+int dataNum = 0;
+int startOfData;
+int endOfData;
 struct instruction {
-    int addr, v, opcode, rs, rt, rd, shamt, imm, asInt, lsb, bsb, target, sa;
+    int addr, v, opcode, rs, rt, rd, shamt, imm, asInt, funct, target, sa, data, dataArr[500];
     unsigned int asUint;
     string out, instr;
     instruction() {}
@@ -32,18 +35,20 @@ struct instruction {
         rd = (asUint << 16) >> 27;
         sa = (asUint >> 6) & 0x1F;
         imm = asInt << 16 >> 16;
-        lsb = asUint & 0x0000003F;
-        bsb = (asUint >> 16) & 0x0000003F;
-        target = (asUint << 2) & 0x03ffffff;
+        funct = asUint << 26 >> 26;
+        shamt = asUint << 21 >> 27;
+        target = asUint << 6 >> 4;
         if (brake == true) {
-            int twosComplement = asInt & ~(1 << 31);
+            data = asInt & ~(1 << 31);
             if (asInt & (1 << 31)) {
-                twosComplement = twosComplement - (1 << 31);
+                data = data - (1 << 31);
             }
-            stringstream ss;
-            ss << twosComplement;
-            instr = ss.str();
+            stringstream ss1;
+            ss1 << data;
+            instr = ss1.str();
             out += instr;
+            dataNum++;
+            endOfData = startOfData + (dataNum * 4);
         }
         if (brake == false){
             if (v == 0) {
@@ -66,7 +71,7 @@ struct instruction {
                 out += instr;
             } else if (opcode == 33) { // BLTZ
                 stringstream ss1;
-                ss1 << "BLTZ\tR" << rs << ", #" << imm * 4;
+                ss1 << "BLTZ\tR" << rs << ", #" << imm;
                 instr = ss1.str();
                 out += instr;
             } else if (opcode == 34) { // J
@@ -79,30 +84,29 @@ struct instruction {
                 ss1 << "BEQ\tR" << rt << ", R" << rs << ", #" << imm;
                 instr = ss1.str();
                 out += instr;
-            } else if (opcode == 60) { // MUL !
+            } else if (opcode == 60) { // MUL
                 stringstream ss1;
                 ss1 << "MUL\t\tR" << rd << ", R" << rs << ", R" << rt;
                 instr = ss1.str();
                 out += instr;
             } else if (opcode == 32) {
-                //OR
-                if (lsb == 34) { //SUB
+                if (funct == 34) { //SUB
                     stringstream ss1;
                     ss1 << "SUB\t\tR" << rd << ", R" << rs << ", R" << rt;
                     instr = ss1.str();
                     out += instr;
-                } else if (lsb == 32) { //ADD
+                } else if (funct == 32) { //ADD
                     stringstream ss1;
                     ss1 << "ADD\t\tR" << rd << ", R" << rs << ", R" << rt;
                     instr = ss1.str();
                     out += instr;
-                } else if (lsb == 8) { //JR
+                } else if (funct == 8) { //JR
                     stringstream ss1;
                     ss1 << "JR\t\tR" << rs;
                     instr = ss1.str();
                     out += instr;
-                } else if (lsb == 0) {
-                    if (bsb == 0) { //NOP
+                } else if (funct == 0) {
+                    if (shamt == 0) { //NOP
                         stringstream ss1;
                         ss1 << "NOP";
                         instr = ss1.str();
@@ -113,22 +117,23 @@ struct instruction {
                         instr = ss1.str();
                         out += instr;
                     }
-                } else if (lsb == 2) { //SRL
+                } else if (funct == 2) { //SRL
                     stringstream ss1;
                     ss1 << "SRL\t\tR" << rd << ", R" << rt << ", #" << sa;
                     instr = ss1.str();
                     out += instr;
-                } else if (lsb == 10) { //MOVZ
+                } else if (funct == 10) { //MOVZ
                     stringstream ss1;
-                    ss1 << "MOVS\tR" << rd << ", R" << rs << ", R" << rt;
+                    ss1 << "MOVZ\tR" << rd << ", R" << rs << ", R" << rt;
                     instr = ss1.str();
                     out += instr;
-                } else if (lsb == 13) { //BREAK
+                } else if (funct == 13) { //BREAK
                     brake = true;
                     stringstream ss1;
                     ss1 << "BREAK";
                     instr = ss1.str();
                     out += instr;
+                    startOfData = addr + 4;
                     
                 }
             }
@@ -137,14 +142,14 @@ struct instruction {
 
 };
 
-int main()
+int main(int argc, char *argv[])
 {
     char buffer[4];
     int i;
     char * iPtr;
     iPtr = (char*)(void*) &i;
     int addr = 96;
-    int FD = open("test1.bin", O_RDONLY);
+    int FD = open(argv[2], O_RDONLY);
     unordered_map< int, instruction> MEM;
     int amt = 4;
     while( amt != 0 )
@@ -168,14 +173,25 @@ int main()
     struct processor{
         int PC = 96, cycle = 1, R[32] = {0};
 
-        void print( const instruction  &I ){
+        void print( const instruction  &I, unordered_map< int, instruction> MEM ){
             stringstream ss1;
             ss1 << "====================\ncycle:" << cycle << "\t"
                 << PC <<"\t\t" << I.instr << "\n\nregisters:";
             for( int i = 0; i < 32; i++ ){
-                if( i %8 == 0 ) ss1 << "\nr"<<i<<":";
+                if( i %8 == 0 )         ss1 << "\n" << "r" << setfill('0') << setw(2) << i << ":";
                 ss1 << "\t" << R[i];
             }
+            
+            ss1 << "\n\ndata:";
+            for (int i = startOfData; i < endOfData; i+=4 ) {
+                if ((((i-startOfData)/4) % 8) == 0) {
+                    ss1 << "\n" << i << ":\t";
+                }
+                ss1 << "\t" << MEM[i].asInt;
+            }
+                
+            
+            
             cout << ss1.str() << endl;
         }
 
@@ -183,6 +199,8 @@ int main()
     //sim!
     processor P;
     while( true ){
+        bool isjump = false;
+        bool isJR = false;
         instruction I = MEM[ P.PC ];
         while( I.v == 0 ){
             P.PC +=4;
@@ -193,53 +211,64 @@ int main()
             P.R[ I.rt ] = P.R[ I.rs ] + I.imm;
         } else if( I.opcode == 43 ) {
             //SW
-            int address = P.R[I.rs] + I.imm;
-            MEM[address].v = P.R[I.rt];
+            MEM[ I.imm + P.R[I.rs]].asInt = P.R[I.rt];
         } else if (I.opcode == 35) {
             //LW
-            int address = P.R[I.rs] + I.imm;
-            P.R[I.rt] = MEM[address].v;
+            P.R[I.rt] = MEM[P.R[I.rs] + I.imm].asInt;
         } else if (I.opcode == 33) {
             //BLTZ
-            if (P.R[I.rt] < 0) {
-                P.PC += 4 * I.imm;
+            if (P.R[I.rs] < 0) {
+                P.PC = P.PC + 4 * I.imm;
             }
         } else if (I.opcode == 34) {
             //J
-            P.PC = (P.PC & 0xf0000000) | (I.imm << 2);
+            isjump = true;
         } else if (I.opcode == 36) {
             //BEQ
             if (P.R[I.rs] == P.R[I.rt]) {
-                P.PC += 4 * I.imm;
+                P.PC += (I.imm << 2);
             }
         } else if (I.opcode == 60) {
             //MUL
             P.R[I.rd] = P.R[I.rs] * P.R[I.rt];
         } else if (I.opcode == 32) {
-            if (I.lsb == 34) { //SUB
+            if (I.funct == 34) {
+                //SUB
                 P.R[I.rd] = P.R[I.rs] - P.R[I.rt];
-            } else if (I.lsb == 32) { //ADD
+            } else if (I.funct == 32) {
+                //ADD
                 P.R[I.rd] = P.R[I.rs] + P.R[I.rt];
-            } else if (I.lsb == 8) { //JR
-                P.PC = P.R[I.rs];
-            } else if (I.lsb == 0) {
-                if (I.bsb == 0) { //NOP
-
-                } else { //SLL
-                    P.R[I.rd] = P.R[I.rt] << I.shamt;
+            } else if (I.funct == 8) {
+                //JR
+                isJR = true;
+            } else if (I.funct == 0) {
+                //SLL
+                P.R[I.rd] = P.R[I.rt] << I.sa;
+            } else if (I.funct == 2) {
+                //SRL
+                P.R[I.rd] = P.R[I.rt] >> I.sa;
+            } else if (I.funct == 10) {
+                //MOVZ
+                if (P.R[I.rt] == 0) {
+                    P.R[I.rd] = P.R[I.rs];
                 }
-            } else if (I.lsb == 2) { //SRL
-                P.R[I.rd] = P.R[I.rt] >> I.shamt;
-            } else if (I.lsb == 10) { //MOVZ
-                P.R[I.rd] = P.R[I.rs];
-            } else if (I.lsb == 13) { //BREAK
+            } else if (I.funct == 13) {
+                //BREAK
+                P.print( I, MEM );
                 break;
             }
         }
         
-        P.print( I );
-        P.PC+=4;
-        P.cycle ++ ;
-        if( P.cycle > 20 ) exit(0);
+        if (isjump == true){
+            P.print( I, MEM );
+            P.PC = I.target;
+        } else if (isJR == true) {
+            P.print( I , MEM);
+            P.PC = P.R[I.rs];
+        } else {
+            P.print( I , MEM);
+            P.PC+=4;
+        }
+        P.cycle++ ;
     }
 }
